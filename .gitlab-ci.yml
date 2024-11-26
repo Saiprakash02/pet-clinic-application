@@ -1,0 +1,182 @@
+default:
+  image: docker:dind
+  services:
+    - docker:dind
+
+before_script:
+  - export COMMIT_ID=$(git rev-parse --short HEAD)
+  - export IMAGE_TAG="${COMMIT_ID}-${CI_PIPELINE_ID}"
+  - export IMAGE_NAME="${NAME}:${IMAGE_TAG}"
+
+stages:
+  - maven-test
+  - sonarqube-check
+  - dependency-check
+  - build-test
+  - dockerfile-creation
+  - hadolint
+  - docker-build-and-trivy-scan
+  - push-ecr
+  - build-complete
+
+maven-test:
+  stage: maven-test
+  image: maven:3.8.5-openjdk-17
+  # tags:
+  #   - ec2-runner
+  script:
+    - mvn clean test
+    - mvn clean install
+  artifacts:
+    paths:
+      - target/
+    expire_in: 1 hour
+
+sonarqube-check:
+  stage: sonarqube-check
+  image: 
+    name: sonarsource/sonar-scanner-cli:latest
+    entrypoint: [""]
+  # tags:
+  #   - ec2-runner
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"
+    GIT_DEPTH: "0"
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script: 
+    - sonar-scanner
+  allow_failure: true
+  only:
+    - main
+
+dependency-check:
+  stage: dependency-check
+  image:
+    name: owasp/dependency-check:latest
+    entrypoint: ['']
+  # tags:
+  #   - ec2-runner
+  cache:
+    - key: "${CI_JOB_NAME}"
+      paths:
+        - ${CI_PROJECT_DIR}/dependency-check/data/
+  script:
+    - /usr/share/dependency-check/bin/dependency-check.sh --scan $CI_PROJECT_DIR --format "ALL" --nvdApiKey $DEPENDENCY_CHECK_API_KEY
+  artifacts:
+    paths:
+      - dependency-check-report.xml
+  timeout: 1h
+  allow_failure: true
+
+build-test:
+  stage: build-test
+  image: maven:3.8.5-openjdk-17
+  script:
+    - mvn clean package
+  # tags:
+  #   - ec2-runner
+  artifacts:
+    paths:
+      - target/
+    expire_in: 1 hour
+
+dockerfile-creation:
+  stage: dockerfile-creation
+  script:
+    - |
+      echo 'FROM tomcat:9.0-jdk17
+      RUN groupadd -r appgroup && useradd -r -g appgroup -m -d /app appuser
+      WORKDIR /app
+      COPY .mvn/ .mvn
+      COPY mvnw pom.xml ./
+      RUN chmod +x mvnw
+      USER appuser
+      COPY src ./src
+      EXPOSE 8080
+      CMD ["./mvnw", "jetty:run-war"]' | tee Dockerfile
+  # tags:
+  #   - ec2-runner
+  artifacts:
+    paths:
+      - Dockerfile
+    expire_in: 1 hour
+
+hadolint:
+  stage: hadolint
+  # image: hadolint/hadolint:latest
+  dependencies:
+    - dockerfile-creation
+  script:
+    - docker run --rm -i hadolint/hadolint < Dockerfile > hadolint_report.txt
+  # tags:
+  #   - ec2-runner
+  artifacts:
+    paths:
+      - hadolint_report.txt
+    expire_in: 1 hour
+
+docker-build-and-trivy-scan:
+  stage: docker-build-and-trivy-scan
+  # image: docker:dind
+  dependencies:
+    - maven-test
+    - build-test
+    - dockerfile-creation
+    - hadolint
+  script:
+    - docker build -t $IMAGE_NAME .
+    - docker save $IMAGE_NAME > image.tar
+    - |
+      for i in $(seq 1 30); do
+        echo "Running Trivy scan attempt #$i"
+        if docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -i aquasec/trivy:0.56.2 image ${IMAGE_NAME} > trivy_report.json; then
+          echo "Trivy scan succeeded on attempt #$i"
+          break
+        else
+          echo "Trivy scan failed on attempt #$i. Retrying in 3 seconds..."
+          sleep 3
+        fi
+        if [ "$i" -eq 30 ]; then
+          echo "Trivy scan failed after 30 attempts."
+          exit 1
+        fi
+      done
+  # tags:
+  #   - ec2-runner
+  artifacts:
+    paths:
+      - trivy_report.json
+      - image.tar
+    expire_in: 1 hour
+
+push-ecr:
+  stage: push-ecr
+  image: saiprakash02/dockerdindaws:v1
+  # tags:
+  #   - ec2-runner
+  script:
+    - |
+      aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+      aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+      aws configure set region $REGION
+      docker load < image.tar
+      aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ECR_URL
+      docker push $IMAGE_NAME
+
+build-complete:
+  stage: build-complete
+  dependencies:
+    - push-ecr
+  # tags:
+  #   - ec2-runner
+  script:
+    - echo "Build completed successfully."
+
+# after_script:
+#   - if [[ "$CI_JOB_STATUS" == "success" ]]; then
+#       echo "Sending Slack notification...";
+#       # Add Slack notification script here
+#     fi
