@@ -2,8 +2,7 @@ pipeline {
   agent any
 
   stages {
-
-    stage('Containerization') {
+    stage('Build') {
       steps {
         script {
           sh """
