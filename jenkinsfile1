@@ -1,11 +1,15 @@
 pipeline {
   agent any
 
+  tools {
+    maven 'maven'  // Specify the Maven installation name
+  }
+
   stages {
     stage('Build') {
       steps {
         script {
-          sh './mvnw clean package'
+          sh 'mvn clean package'  // No need for ./mvnw now
         }
       }
     }
@@ -14,16 +18,37 @@ pipeline {
       steps {
         script {
           sh """
-            docker build -t spring-petclinic:\${env.BUILD_NUMBER} .
+            docker build -t spring-petclinic:${env.BUILD_NUMBER} .
           """
         }
       }
     }
   }
-  
+
   post {
     failure {
-      echo 'Pipeline failed'
+      script {
+        try {
+          echo "Getting full pipeline log..."
+
+          def log = currentBuild.rawBuild.getLog(Integer.MAX_VALUE)
+          def logText = log.join("\n")
+
+          // Construct JSON payload with log inside
+          def payload = groovy.json.JsonOutput.toJson([log: logText])
+
+          def response = httpRequest(
+            httpMode: 'POST',
+            url: 'https://clops.app.n8n.cloud/webhook/cd51c894-e55e-40ee-b674-eb1839605b78',
+            contentType: 'APPLICATION_JSON',
+            requestBody: payload
+          )
+
+          echo "Webhook response: ${response.status} - ${response.content}"
+        } catch (Exception e) {
+          echo "ERROR sending webhook: ${e.message}"
+        }
+      }
     }
   }
 }
