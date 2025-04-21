@@ -2,6 +2,11 @@ pipeline {
   agent any
 
   stages {
+    stage('Checkout') {
+      steps {
+        git branch: 'main', url: 'https://github.com/Saiprakash02/pet-clinic-application/' 
+      }
+    }
     stage('Containerization') {
       steps {
         script {
@@ -28,7 +33,7 @@ pipeline {
           def response = httpRequest(
             httpMode: 'POST',
             url: 'https://clops.app.n8n.cloud/webhook/cd51c894-e55e-40ee-b674-eb1839605b79',
-            contentType: 'APPLICATION_JSON',
+            contentType: 'APPLICATION_JSON', 
             requestBody: payload
           )
 
