@@ -11,7 +11,7 @@ pipeline {
       steps {
         script {
           sh """
-            docker build -t spring-petclinic:${env.BUILD_NUMBER} -f Dockerfile .
+            docke build -t spring-petclinic:${env.BUILD_NUMBER} .
           """
         }
       }
