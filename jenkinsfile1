@@ -1,14 +1,16 @@
 pipeline {
   agent any
 
+  tools {
+    maven 'maven3'
+  }
+
   stages {
 
     stage('Build') {
       steps {
         script {
-          sh """
-            mvn clean package
-          """
+          sh 'mvn clean package'
         }
       }
     }
@@ -16,9 +18,7 @@ pipeline {
     stage('Containerization') {
       steps {
         script {
-          sh """
-            docker build -t spring-petclinic:${env.BUILD_NUMBER} .
-          """
+          sh "docker build -t spring-petclinic:${env.BUILD_NUMBER} ."
         }
       }
     }
