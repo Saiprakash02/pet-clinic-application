@@ -1,24 +1,13 @@
 pipeline {
   agent any
 
-  tools {
-    maven 'maven'  // Specify the Maven installation name
-  }
-
   stages {
-    stage('Build') {
-      steps {
-        script {
-          sh 'mvn clean package'  // No need for ./mvnw now
-        }
-      }
-    }
 
     stage('Containerization') {
       steps {
         script {
           sh """
-            docker build -t spring-petclinic:${env.BUILD_NUMBER} .
+            docke build -t spring-petclinic:${env.BUILD_NUMBER} .
           """
         }
       }
@@ -39,7 +28,7 @@ pipeline {
 
           def response = httpRequest(
             httpMode: 'POST',
-            url: 'https://clops.app.n8n.cloud/webhook/cd51c894-e55e-40ee-b674-eb1839605b78',
+            url: 'https://clops.app.n8n.cloud/webhook/cd51c894-e55e-40ee-b674-eb1839605b79',
             contentType: 'APPLICATION_JSON',
             requestBody: payload
           )
